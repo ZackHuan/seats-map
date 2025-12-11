@@ -2,6 +2,17 @@ import { useState, useRef } from 'react';
 
 const GRID_SIZE = 20;
 const SNAP_THRESHOLD = 10;
+const SELECTION_BORDER_WIDTH = 2;
+const SELECTION_BORDER_OFFSET = -10;
+
+// Helper function to generate grid background style
+const getGridBackgroundStyle = (gridSize) => ({
+  backgroundImage: `
+    repeating-linear-gradient(0deg, transparent, transparent ${gridSize - 1}px, rgba(100, 116, 139, 0.3) ${gridSize - 1}px, rgba(100, 116, 139, 0.3) ${gridSize}px),
+    repeating-linear-gradient(90deg, transparent, transparent ${gridSize - 1}px, rgba(100, 116, 139, 0.3) ${gridSize - 1}px, rgba(100, 116, 139, 0.3) ${gridSize}px)
+  `,
+  backgroundColor: '#1a202c'
+});
 
 const SeatMap = () => {
   const [items, setItems] = useState([]);
@@ -82,9 +93,7 @@ const SeatMap = () => {
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
-    if (isDrawing && drawStart && drawingMode) {
-      // Visual feedback while drawing (handled in render)
-    } else if (draggingItemId) {
+    if (draggingItemId) {
       const newX = snapToGrid(mouseX - dragOffset.x);
       const newY = snapToGrid(mouseY - dragOffset.y);
       
@@ -117,9 +126,14 @@ const SeatMap = () => {
 
   // Update item property
   const updateItem = (itemId, property, value) => {
+    // Parse numeric strings to numbers
+    const parsedValue = typeof value === 'string' && !isNaN(parseFloat(value)) 
+      ? parseFloat(value) 
+      : value;
+    
     setItems(items.map(item => 
       item.id === itemId 
-        ? { ...item, [property]: typeof value === 'string' && !isNaN(parseFloat(value)) ? parseFloat(value) : value }
+        ? { ...item, [property]: parsedValue }
         : item
     ));
   };
@@ -328,13 +342,7 @@ const SeatMap = () => {
           <div
             ref={canvasRef}
             className="w-full h-full relative cursor-crosshair"
-            style={{
-              backgroundImage: `
-                repeating-linear-gradient(0deg, transparent, transparent ${GRID_SIZE - 1}px, rgba(100, 116, 139, 0.3) ${GRID_SIZE - 1}px, rgba(100, 116, 139, 0.3) ${GRID_SIZE}px),
-                repeating-linear-gradient(90deg, transparent, transparent ${GRID_SIZE - 1}px, rgba(100, 116, 139, 0.3) ${GRID_SIZE - 1}px, rgba(100, 116, 139, 0.3) ${GRID_SIZE}px)
-              `,
-              backgroundColor: '#1a202c'
-            }}
+            style={getGridBackgroundStyle(GRID_SIZE)}
             onMouseDown={handleCanvasMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
@@ -416,8 +424,12 @@ const SeatRow = ({ item, isSelected, onMouseDown }) => {
       onMouseDown={onMouseDown}
     >
       {isSelected && (
-        <div className="absolute inset-0 border-2 border-blue-400 rounded-lg pointer-events-none" 
-             style={{ marginLeft: '-10px', marginRight: '-10px', marginTop: '-10px', marginBottom: '-10px' }} />
+        <div 
+          className="absolute inset-0 border-2 border-blue-400 rounded-lg pointer-events-none" 
+          style={{ 
+            margin: `${SELECTION_BORDER_OFFSET}px`
+          }} 
+        />
       )}
       {seatPositions.map((pos, i) => (
         <div
