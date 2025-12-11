@@ -57,7 +57,8 @@ const SeatMap = () => {
 
   // Handle canvas mouse down
   const handleCanvasMouseDown = (e) => {
-    if (e.target !== canvasRef.current) return;
+    // Only handle clicks on the SVG canvas itself, not on its children
+    if (e.target.tagName !== 'svg' && e.target !== canvasRef.current) return;
     
     const rect = canvasRef.current.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
@@ -338,20 +339,46 @@ const SeatMap = () => {
         )}
 
         {/* Main Canvas */}
-        <div className="flex-1 overflow-hidden relative">
-          <div
+        <div className="flex-1 overflow-hidden relative" style={getGridBackgroundStyle(GRID_SIZE)}>
+          <svg
             ref={canvasRef}
-            className="w-full h-full relative cursor-crosshair"
-            style={getGridBackgroundStyle(GRID_SIZE)}
+            className="w-full h-full cursor-crosshair"
             onMouseDown={handleCanvasMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
           >
+            {/* Define gradients and patterns */}
+            <defs>
+              <linearGradient id="stageGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" style={{ stopColor: '#9333ea', stopOpacity: 1 }} />
+                <stop offset="100%" style={{ stopColor: '#ec4899', stopOpacity: 1 }} />
+              </linearGradient>
+            </defs>
+
             {/* Stage */}
-            <div className="absolute top-8 left-1/2 transform -translate-x-1/2 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold py-3 px-16 rounded-lg shadow-lg z-10">
-              STAGE
-            </div>
+            <g>
+              <rect
+                x="50%"
+                y="32"
+                width="200"
+                height="48"
+                rx="8"
+                fill="url(#stageGradient)"
+                filter="drop-shadow(0 4px 6px rgba(0,0,0,0.3))"
+                transform="translate(-100, 0)"
+              />
+              <text
+                x="50%"
+                y="60"
+                textAnchor="middle"
+                fill="white"
+                fontSize="18"
+                fontWeight="bold"
+              >
+                STAGE
+              </text>
+            </g>
 
             {/* Render items */}
             {items.map((item) => (
@@ -363,12 +390,20 @@ const SeatMap = () => {
               />
             ))}
 
+            {/* Empty state text */}
             {items.length === 0 && !isDrawing && (
-              <div className="absolute inset-0 flex items-center justify-center text-gray-500 text-xl pointer-events-none">
+              <text
+                x="50%"
+                y="50%"
+                textAnchor="middle"
+                fill="#6b7280"
+                fontSize="20"
+                style={{ pointerEvents: 'none' }}
+              >
                 Select a tool from the toolbar and click & drag to create items
-              </div>
+              </text>
             )}
-          </div>
+          </svg>
         </div>
       </div>
     </div>
@@ -387,7 +422,7 @@ const CanvasItem = ({ item, isSelected, onMouseDown }) => {
   return null;
 };
 
-// Seat Row Component
+// Seat Row Component (SVG-based)
 const SeatRow = ({ item, isSelected, onMouseDown }) => {
   const { x, y, seats, rotation, curve } = item;
 
@@ -409,96 +444,120 @@ const SeatRow = ({ item, isSelected, onMouseDown }) => {
     });
   }
 
+  const centerX = x + (totalWidth + 50) / 2;
+  const centerY = y + 25;
+
   return (
-    <div
-      className="absolute cursor-move"
-      style={{
-        left: `${x}px`,
-        top: `${y}px`,
-        transform: `rotate(${rotation}deg)`,
-        transformOrigin: 'center',
-        width: `${totalWidth + 50}px`,
-        height: '50px',
-        position: 'absolute',
-      }}
+    <g
+      transform={`rotate(${rotation}, ${centerX}, ${centerY})`}
+      style={{ cursor: 'move' }}
       onMouseDown={onMouseDown}
     >
+      {/* Selection border */}
       {isSelected && (
-        <div 
-          className="absolute inset-0 border-2 border-blue-400 rounded-lg pointer-events-none" 
-          style={{ 
-            margin: `${SELECTION_BORDER_OFFSET}px`
-          }} 
+        <rect
+          x={x + SELECTION_BORDER_OFFSET}
+          y={y + SELECTION_BORDER_OFFSET}
+          width={totalWidth + 50 - 2 * SELECTION_BORDER_OFFSET}
+          height={50 - 2 * SELECTION_BORDER_OFFSET}
+          fill="none"
+          stroke="#60a5fa"
+          strokeWidth="2"
+          rx="8"
+          style={{ pointerEvents: 'none' }}
         />
       )}
-      {seatPositions.map((pos, i) => (
-        <div
-          key={i}
-          className="absolute rounded-t-lg transition-colors duration-200"
-          style={{
-            left: `calc(50% + ${pos.x}px)`,
-            top: `${pos.y}px`,
-            width: '32px',
-            height: '32px',
-            transform: 'translateX(-50%)',
-            boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
-            backgroundColor: isSelected ? '#3b82f6' : '#22c55e',
-            borderTopLeftRadius: '8px',
-            borderTopRightRadius: '8px',
-            transition: 'background-color 0.2s',
-          }}
-          title={`Seat ${i + 1}`}
-        />
-      ))}
-    </div>
+      
+      {/* Render seats */}
+      {seatPositions.map((pos, i) => {
+        const seatX = centerX + pos.x - 16;
+        const seatY = y + pos.y;
+        
+        return (
+          <g key={i}>
+            <rect
+              x={seatX}
+              y={seatY}
+              width="32"
+              height="32"
+              rx="8"
+              ry="0"
+              fill={isSelected ? '#3b82f6' : '#22c55e'}
+              filter="drop-shadow(0 2px 4px rgba(0,0,0,0.3))"
+              style={{ transition: 'fill 0.2s' }}
+            >
+              <title>Seat {i + 1}</title>
+            </rect>
+          </g>
+        );
+      })}
+    </g>
   );
 };
 
-// Block Component
+// Block Component (SVG-based)
 const Block = ({ item, isSelected, onMouseDown }) => {
   const { x, y, width, height, name } = item;
 
   return (
-    <div
-      className={`absolute cursor-move rounded-lg flex items-center justify-center font-bold text-white transition-all ${
-        isSelected ? 'ring-4 ring-purple-400 bg-purple-600' : 'bg-purple-500 hover:bg-purple-600'
-      }`}
-      style={{
-        left: `${x}px`,
-        top: `${y}px`,
-        width: `${width}px`,
-        height: `${height}px`,
-        boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
-      }}
-      onMouseDown={onMouseDown}
-    >
-      {name}
-    </div>
+    <g style={{ cursor: 'move' }} onMouseDown={onMouseDown}>
+      <rect
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        rx="8"
+        fill={isSelected ? '#9333ea' : '#a855f7'}
+        filter="drop-shadow(0 4px 6px rgba(0,0,0,0.3))"
+        stroke={isSelected ? '#c084fc' : 'none'}
+        strokeWidth={isSelected ? '4' : '0'}
+        style={{ transition: 'fill 0.2s, stroke 0.2s' }}
+      />
+      <text
+        x={x + width / 2}
+        y={y + height / 2}
+        textAnchor="middle"
+        dominantBaseline="middle"
+        fill="white"
+        fontSize="16"
+        fontWeight="bold"
+      >
+        {name}
+      </text>
+    </g>
   );
 };
 
-// Group Component
+// Group Component (SVG-based)
 const Group = ({ item, isSelected, onMouseDown }) => {
   const { x, y, width, height, name } = item;
 
   return (
-    <div
-      className={`absolute cursor-move rounded-lg border-4 flex items-center justify-center font-bold transition-all ${
-        isSelected 
-          ? 'border-green-400 bg-green-600 bg-opacity-30 text-green-100' 
-          : 'border-green-500 bg-green-500 bg-opacity-20 text-green-200 hover:bg-opacity-30'
-      }`}
-      style={{
-        left: `${x}px`,
-        top: `${y}px`,
-        width: `${width}px`,
-        height: `${height}px`,
-        boxShadow: '0 4px 6px rgba(0,0,0,0.2)',
-      }}
-      onMouseDown={onMouseDown}
-    >
-      {name}
-    </div>
+    <g style={{ cursor: 'move' }} onMouseDown={onMouseDown}>
+      <rect
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        rx="8"
+        fill={isSelected ? 'rgba(34, 197, 94, 0.3)' : 'rgba(34, 197, 94, 0.2)'}
+        stroke={isSelected ? '#4ade80' : '#22c55e'}
+        strokeWidth="4"
+        filter="drop-shadow(0 4px 6px rgba(0,0,0,0.2))"
+        style={{ transition: 'fill 0.2s, stroke 0.2s' }}
+      />
+      <text
+        x={x + width / 2}
+        y={y + height / 2}
+        textAnchor="middle"
+        dominantBaseline="middle"
+        fill={isSelected ? '#dcfce7' : '#bbf7d0'}
+        fontSize="16"
+        fontWeight="bold"
+      >
+        {name}
+      </text>
+    </g>
   );
 };
 
