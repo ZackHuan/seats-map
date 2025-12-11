@@ -4,6 +4,9 @@ const GRID_SIZE = 20;
 const SNAP_THRESHOLD = 10;
 const SELECTION_BORDER_WIDTH = 2;
 const SELECTION_BORDER_OFFSET = -10;
+const SEAT_WIDTH = 32;
+const SEAT_HALF_WIDTH = SEAT_WIDTH / 2;
+const STAGE_WIDTH = 200;
 
 // Helper function to generate grid background style
 const getGridBackgroundStyle = (gridSize) => ({
@@ -58,7 +61,7 @@ const SeatMap = () => {
   // Handle canvas mouse down
   const handleCanvasMouseDown = (e) => {
     // Only handle clicks on the SVG canvas itself, not on its children
-    if (e.target.tagName !== 'svg' && e.target !== canvasRef.current) return;
+    if (e.target.tagName.toLowerCase() !== 'svg' && e.target !== canvasRef.current) return;
     
     const rect = canvasRef.current.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
@@ -361,12 +364,12 @@ const SeatMap = () => {
               <rect
                 x="50%"
                 y="32"
-                width="200"
+                width={STAGE_WIDTH}
                 height="48"
                 rx="8"
                 fill="url(#stageGradient)"
                 filter="drop-shadow(0 4px 6px rgba(0,0,0,0.3))"
-                transform="translate(-100, 0)"
+                transform={`translate(-${STAGE_WIDTH / 2}, 0)`}
               />
               <text
                 x="50%"
@@ -470,7 +473,7 @@ const SeatRow = ({ item, isSelected, onMouseDown }) => {
       
       {/* Render seats */}
       {seatPositions.map((pos, i) => {
-        const seatX = centerX + pos.x - 16;
+        const seatX = centerX + pos.x - SEAT_HALF_WIDTH;
         const seatY = y + pos.y;
         
         return (
@@ -478,8 +481,8 @@ const SeatRow = ({ item, isSelected, onMouseDown }) => {
             <rect
               x={seatX}
               y={seatY}
-              width="32"
-              height="32"
+              width={SEAT_WIDTH}
+              height={SEAT_WIDTH}
               rx="8"
               ry="0"
               fill={isSelected ? '#3b82f6' : '#22c55e'}
