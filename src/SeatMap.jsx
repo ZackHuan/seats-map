@@ -1,210 +1,433 @@
 import { useState, useRef } from 'react';
 
+const GRID_SIZE = 20;
+const SNAP_THRESHOLD = 10;
+const SELECTION_BORDER_WIDTH = 2;
+const SELECTION_BORDER_OFFSET = -10;
+const SEAT_WIDTH = 32;
+const SEAT_HALF_WIDTH = SEAT_WIDTH / 2;
+const STAGE_WIDTH = 200;
+
+// Helper function to generate grid background style
+const getGridBackgroundStyle = (gridSize) => ({
+  backgroundImage: `
+    repeating-linear-gradient(0deg, transparent, transparent ${gridSize - 1}px, rgba(100, 116, 139, 0.3) ${gridSize - 1}px, rgba(100, 116, 139, 0.3) ${gridSize}px),
+    repeating-linear-gradient(90deg, transparent, transparent ${gridSize - 1}px, rgba(100, 116, 139, 0.3) ${gridSize - 1}px, rgba(100, 116, 139, 0.3) ${gridSize}px)
+  `,
+  backgroundColor: '#1a202c'
+});
+
 const SeatMap = () => {
-  const [rows, setRows] = useState([]);
-  const [selectedRowId, setSelectedRowId] = useState(null);
-  const [draggingRowId, setDraggingRowId] = useState(null);
+  const [items, setItems] = useState([]);
+  const [selectedItemId, setSelectedItemId] = useState(null);
+  const [draggingItemId, setDraggingItemId] = useState(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [drawingMode, setDrawingMode] = useState(null); // 'row', 'block', 'group', null
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [drawStart, setDrawStart] = useState(null);
   const canvasRef = useRef(null);
 
-  // Add a new row of seats
-  const addRow = () => {
-    const newRow = {
-      id: Date.now(),
-      x: 100,
-      y: 100 + rows.length * 60,
-      seats: 10,
-      rotation: 0,
-      curve: 0,
-    };
-    setRows([...rows, newRow]);
+  // Snap to grid helper
+  const snapToGrid = (value) => {
+    return Math.round(value / GRID_SIZE) * GRID_SIZE;
   };
 
-  // Handle mouse down on a row
-  const handleMouseDown = (e, rowId) => {
-    const row = rows.find(r => r.id === rowId);
-    if (!row) return;
+  // Add a new item based on drawing mode
+  const createItem = (x, y, width = 100, height = 50) => {
+    const snappedX = snapToGrid(x);
+    const snappedY = snapToGrid(y);
+    
+    let newItem = {
+      id: Date.now(),
+      x: snappedX,
+      y: snappedY,
+      width: width,
+      height: height,
+      type: drawingMode || 'row',
+    };
+
+    if (drawingMode === 'row') {
+      newItem = { ...newItem, seats: 10, rotation: 0, curve: 0 };
+    } else if (drawingMode === 'block') {
+      newItem = { ...newItem, name: 'Block ' + (items.filter(i => i.type === 'block').length + 1) };
+    } else if (drawingMode === 'group') {
+      newItem = { ...newItem, name: 'Group ' + (items.filter(i => i.type === 'group').length + 1) };
+    }
+
+    setItems([...items, newItem]);
+    setSelectedItemId(newItem.id);
+  };
+
+  // Handle canvas mouse down
+  const handleCanvasMouseDown = (e) => {
+    // Only handle clicks on the SVG canvas itself, not on its children
+    if (e.target.tagName.toLowerCase() !== 'svg' && e.target !== canvasRef.current) return;
+    
+    const rect = canvasRef.current.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    if (drawingMode) {
+      setIsDrawing(true);
+      setDrawStart({ x: mouseX, y: mouseY });
+    } else {
+      // Deselect if clicking on empty canvas
+      setSelectedItemId(null);
+    }
+  };
+
+  // Handle mouse down on an item
+  const handleItemMouseDown = (e, itemId) => {
+    e.stopPropagation();
+    const item = items.find(i => i.id === itemId);
+    if (!item) return;
 
     const rect = canvasRef.current.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
-    setDraggingRowId(rowId);
-    setSelectedRowId(rowId);
-    setDragOffset({ x: mouseX - row.x, y: mouseY - row.y });
+    setDraggingItemId(itemId);
+    setSelectedItemId(itemId);
+    setDragOffset({ x: mouseX - item.x, y: mouseY - item.y });
   };
 
   // Handle mouse move
   const handleMouseMove = (e) => {
-    if (!draggingRowId) return;
-
     const rect = canvasRef.current.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
-    setRows(rows.map(row => 
-      row.id === draggingRowId 
-        ? { ...row, x: mouseX - dragOffset.x, y: mouseY - dragOffset.y }
-        : row
-    ));
-  };
-
-  // Handle mouse up
-  const handleMouseUp = () => {
-    setDraggingRowId(null);
-  };
-
-  // Update row property
-  const updateRow = (rowId, property, value) => {
-    setRows(rows.map(row => 
-      row.id === rowId 
-        ? { ...row, [property]: parseFloat(value) }
-        : row
-    ));
-  };
-
-  // Delete row
-  const deleteRow = (rowId) => {
-    setRows(rows.filter(row => row.id !== rowId));
-    if (selectedRowId === rowId) {
-      setSelectedRowId(null);
+    if (draggingItemId) {
+      const newX = snapToGrid(mouseX - dragOffset.x);
+      const newY = snapToGrid(mouseY - dragOffset.y);
+      
+      setItems(items.map(item => 
+        item.id === draggingItemId 
+          ? { ...item, x: newX, y: newY }
+          : item
+      ));
     }
   };
 
-  // Get selected row
-  const selectedRow = rows.find(row => row.id === selectedRowId);
+  // Handle mouse up
+  const handleMouseUp = (e) => {
+    if (isDrawing && drawStart && drawingMode) {
+      const rect = canvasRef.current.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      const x = Math.min(drawStart.x, mouseX);
+      const y = Math.min(drawStart.y, mouseY);
+      const width = Math.max(Math.abs(mouseX - drawStart.x), 100);
+      const height = Math.max(Math.abs(mouseY - drawStart.y), 50);
+
+      createItem(x, y, width, height);
+      setIsDrawing(false);
+      setDrawStart(null);
+    }
+    setDraggingItemId(null);
+  };
+
+  // Update item property
+  const updateItem = (itemId, property, value) => {
+    // Parse numeric strings to numbers
+    const parsedValue = typeof value === 'string' && !isNaN(parseFloat(value)) 
+      ? parseFloat(value) 
+      : value;
+    
+    setItems(items.map(item => 
+      item.id === itemId 
+        ? { ...item, [property]: parsedValue }
+        : item
+    ));
+  };
+
+  // Delete item
+  const deleteItem = (itemId) => {
+    setItems(items.filter(item => item.id !== itemId));
+    if (selectedItemId === itemId) {
+      setSelectedItemId(null);
+    }
+  };
+
+  // Get selected item
+  const selectedItem = items.find(item => item.id === selectedItemId);
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-8">
-      <div className="max-w-7xl mx-auto">
-        <h1 className="text-4xl font-bold mb-8 text-center">Concert Seat Map</h1>
+    <div className="h-screen bg-gray-900 text-white flex flex-col overflow-hidden">
+      {/* Top Toolbox */}
+      <div className="bg-gray-800 border-b border-gray-700 px-6 py-3 flex items-center gap-4">
+        <h1 className="text-xl font-bold mr-4">Seat Map Designer</h1>
         
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Control Panel */}
-          <div className="lg:col-span-1 space-y-4">
-            <div className="bg-gray-800 rounded-lg p-6">
-              <h2 className="text-2xl font-semibold mb-4">Controls</h2>
-              <button
-                onClick={addRow}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition duration-200"
-              >
-                Add Seat Row
-              </button>
-            </div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setDrawingMode(drawingMode === 'row' ? null : 'row')}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+              drawingMode === 'row'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+          >
+            🪑 Seat Row
+          </button>
+          
+          <button
+            onClick={() => setDrawingMode(drawingMode === 'block' ? null : 'block')}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+              drawingMode === 'block'
+                ? 'bg-purple-600 text-white'
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+          >
+            ⬛ Block
+          </button>
+          
+          <button
+            onClick={() => setDrawingMode(drawingMode === 'group' ? null : 'group')}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+              drawingMode === 'group'
+                ? 'bg-green-600 text-white'
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+          >
+            📦 Group
+          </button>
+        </div>
 
-            {selectedRow && (
-              <div className="bg-gray-800 rounded-lg p-6">
-                <h2 className="text-2xl font-semibold mb-4">Row Settings</h2>
-                
-                <div className="space-y-4">
+        <div className="ml-auto text-sm text-gray-400">
+          {drawingMode ? `Drawing mode: ${drawingMode} - Click and drag on canvas` : 'Select a tool or click items to edit'}
+        </div>
+      </div>
+
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left Properties Panel */}
+        {selectedItem && (
+          <div className="w-80 bg-gray-800 border-r border-gray-700 p-6 overflow-y-auto">
+            <h2 className="text-xl font-semibold mb-4">Properties</h2>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1 text-gray-300">
+                  Type
+                </label>
+                <div className="px-3 py-2 bg-gray-700 rounded-lg text-white capitalize">
+                  {selectedItem.type}
+                </div>
+              </div>
+
+              {selectedItem.type === 'row' && (
+                <>
                   <div>
-                    <label className="block text-sm font-medium mb-2">
-                      Number of Seats: {selectedRow.seats}
+                    <label className="block text-sm font-medium mb-2 text-gray-300">
+                      Number of Seats: {selectedItem.seats}
                     </label>
                     <input
                       type="range"
                       min="1"
-                      max="20"
-                      value={selectedRow.seats}
-                      onChange={(e) => updateRow(selectedRow.id, 'seats', e.target.value)}
+                      max="30"
+                      value={selectedItem.seats}
+                      onChange={(e) => updateItem(selectedItem.id, 'seats', e.target.value)}
                       className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium mb-2">
-                      Rotation: {selectedRow.rotation}°
+                    <label className="block text-sm font-medium mb-2 text-gray-300">
+                      Rotation: {selectedItem.rotation}°
                     </label>
                     <input
                       type="range"
                       min="0"
                       max="360"
-                      value={selectedRow.rotation}
-                      onChange={(e) => updateRow(selectedRow.id, 'rotation', e.target.value)}
+                      value={selectedItem.rotation}
+                      onChange={(e) => updateItem(selectedItem.id, 'rotation', e.target.value)}
                       className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium mb-2">
-                      Curve: {selectedRow.curve}
+                    <label className="block text-sm font-medium mb-2 text-gray-300">
+                      Curve: {selectedItem.curve}
                     </label>
                     <input
                       type="range"
                       min="-100"
                       max="100"
-                      value={selectedRow.curve}
-                      onChange={(e) => updateRow(selectedRow.id, 'curve', e.target.value)}
+                      value={selectedItem.curve}
+                      onChange={(e) => updateItem(selectedItem.id, 'curve', e.target.value)}
                       className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
                     />
                   </div>
+                </>
+              )}
 
-                  <button
-                    onClick={() => deleteRow(selectedRow.id)}
-                    className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200"
-                  >
-                    Delete Row
-                  </button>
-                </div>
-              </div>
-            )}
-
-            <div className="bg-gray-800 rounded-lg p-6">
-              <h2 className="text-2xl font-semibold mb-4">Instructions</h2>
-              <ul className="space-y-2 text-sm text-gray-300">
-                <li>• Click "Add Seat Row" to create rows</li>
-                <li>• Click and drag rows to move them</li>
-                <li>• Select a row to adjust settings</li>
-                <li>• Use rotation to angle rows</li>
-                <li>• Use curve to create curved rows</li>
-              </ul>
-            </div>
-          </div>
-
-          {/* Canvas */}
-          <div className="lg:col-span-2">
-            <div className="bg-gray-800 rounded-lg p-6">
-              <h2 className="text-2xl font-semibold mb-4">Stage & Seating</h2>
-              <div
-                ref={canvasRef}
-                className="bg-gray-900 rounded-lg relative overflow-hidden cursor-move"
-                style={{ height: '600px' }}
-                onMouseMove={handleMouseMove}
-                onMouseUp={handleMouseUp}
-                onMouseLeave={handleMouseUp}
-              >
-                {/* Stage */}
-                <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold py-3 px-12 rounded-lg shadow-lg">
-                  STAGE
-                </div>
-
-                {/* Render seats */}
-                {rows.map((row) => (
-                  <SeatRow
-                    key={row.id}
-                    row={row}
-                    isSelected={selectedRowId === row.id}
-                    onMouseDown={(e) => handleMouseDown(e, row.id)}
-                  />
-                ))}
-
-                {rows.length === 0 && (
-                  <div className="absolute inset-0 flex items-center justify-center text-gray-500 text-xl">
-                    Click "Add Seat Row" to start creating your seat map
+              {(selectedItem.type === 'block' || selectedItem.type === 'group') && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium mb-2 text-gray-300">
+                      Name
+                    </label>
+                    <input
+                      type="text"
+                      value={selectedItem.name || ''}
+                      onChange={(e) => updateItem(selectedItem.id, 'name', e.target.value)}
+                      className="w-full px-3 py-2 bg-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
                   </div>
-                )}
+
+                  <div>
+                    <label className="block text-sm font-medium mb-2 text-gray-300">
+                      Width: {selectedItem.width}px
+                    </label>
+                    <input
+                      type="range"
+                      min="50"
+                      max="500"
+                      value={selectedItem.width}
+                      onChange={(e) => updateItem(selectedItem.id, 'width', e.target.value)}
+                      className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-600"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-2 text-gray-300">
+                      Height: {selectedItem.height}px
+                    </label>
+                    <input
+                      type="range"
+                      min="30"
+                      max="300"
+                      value={selectedItem.height}
+                      onChange={(e) => updateItem(selectedItem.id, 'height', e.target.value)}
+                      className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-600"
+                    />
+                  </div>
+                </>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium mb-2 text-gray-300">
+                  Position
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs text-gray-400">X</label>
+                    <input
+                      type="number"
+                      value={selectedItem.x}
+                      onChange={(e) => updateItem(selectedItem.id, 'x', e.target.value)}
+                      className="w-full px-2 py-1 bg-gray-700 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400">Y</label>
+                    <input
+                      type="number"
+                      value={selectedItem.y}
+                      onChange={(e) => updateItem(selectedItem.id, 'y', e.target.value)}
+                      className="w-full px-2 py-1 bg-gray-700 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
               </div>
+
+              <button
+                onClick={() => deleteItem(selectedItem.id)}
+                className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200 mt-4"
+              >
+                Delete {selectedItem.type}
+              </button>
             </div>
           </div>
+        )}
+
+        {/* Main Canvas */}
+        <div className="flex-1 overflow-hidden relative" style={getGridBackgroundStyle(GRID_SIZE)}>
+          <svg
+            ref={canvasRef}
+            className="w-full h-full cursor-crosshair"
+            onMouseDown={handleCanvasMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+          >
+            {/* Define gradients and patterns */}
+            <defs>
+              <linearGradient id="stageGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" style={{ stopColor: '#9333ea', stopOpacity: 1 }} />
+                <stop offset="100%" style={{ stopColor: '#ec4899', stopOpacity: 1 }} />
+              </linearGradient>
+            </defs>
+
+            {/* Stage */}
+            <g>
+              <rect
+                x="50%"
+                y="32"
+                width={STAGE_WIDTH}
+                height="48"
+                rx="8"
+                fill="url(#stageGradient)"
+                filter="drop-shadow(0 4px 6px rgba(0,0,0,0.3))"
+                transform={`translate(-${STAGE_WIDTH / 2}, 0)`}
+              />
+              <text
+                x="50%"
+                y="60"
+                textAnchor="middle"
+                fill="white"
+                fontSize="18"
+                fontWeight="bold"
+              >
+                STAGE
+              </text>
+            </g>
+
+            {/* Render items */}
+            {items.map((item) => (
+              <CanvasItem
+                key={item.id}
+                item={item}
+                isSelected={selectedItemId === item.id}
+                onMouseDown={(e) => handleItemMouseDown(e, item.id)}
+              />
+            ))}
+
+            {/* Empty state text */}
+            {items.length === 0 && !isDrawing && (
+              <text
+                x="50%"
+                y="50%"
+                textAnchor="middle"
+                fill="#6b7280"
+                fontSize="20"
+                style={{ pointerEvents: 'none' }}
+              >
+                Select a tool from the toolbar and click & drag to create items
+              </text>
+            )}
+          </svg>
         </div>
       </div>
     </div>
   );
 };
 
-// Seat Row Component
-const SeatRow = ({ row, isSelected, onMouseDown }) => {
-  const { x, y, seats, rotation, curve } = row;
+// Canvas Item Component - Renders different types of items
+const CanvasItem = ({ item, isSelected, onMouseDown }) => {
+  if (item.type === 'row') {
+    return <SeatRow item={item} isSelected={isSelected} onMouseDown={onMouseDown} />;
+  } else if (item.type === 'block') {
+    return <Block item={item} isSelected={isSelected} onMouseDown={onMouseDown} />;
+  } else if (item.type === 'group') {
+    return <Group item={item} isSelected={isSelected} onMouseDown={onMouseDown} />;
+  }
+  return null;
+};
+
+// Seat Row Component (SVG-based)
+const SeatRow = ({ item, isSelected, onMouseDown }) => {
+  const { x, y, seats, rotation, curve } = item;
 
   // Calculate seat positions based on curve
   const seatPositions = [];
@@ -224,50 +447,120 @@ const SeatRow = ({ row, isSelected, onMouseDown }) => {
     });
   }
 
+  const centerX = x + (totalWidth + 50) / 2;
+  const centerY = y + 25;
+
   return (
-    <div
-      className="absolute cursor-move"
-      style={{
-        left: `${x}px`,
-        top: `${y}px`,
-        transform: `rotate(${rotation}deg)`,
-        transformOrigin: 'center',
-        width: `${totalWidth + 50}px`,
-        height: '50px',
-        position: 'absolute',
-      }}
+    <g
+      transform={`rotate(${rotation}, ${centerX}, ${centerY})`}
+      style={{ cursor: 'move' }}
       onMouseDown={onMouseDown}
     >
-      {seatPositions.map((pos, i) => (
-        <div
-          key={i}
-          className={`absolute rounded-t-lg transition-colors duration-200 ${
-            isSelected 
-              ? 'bg-blue-500 hover:bg-blue-600' 
-              : 'bg-green-500 hover:bg-green-600'
-          }`}
-          style={{
-            left: `calc(50% + ${pos.x}px)`,
-            top: `${pos.y}px`,
-            width: '32px',
-            height: '32px',
-            transform: 'translateX(-50%)',
-            boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
-            backgroundColor: isSelected ? '#3b82f6' : '#22c55e',
-            borderTopLeftRadius: '8px',
-            borderTopRightRadius: '8px',
-            transition: 'background-color 0.2s',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = isSelected ? '#2563eb' : '#16a34a';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = isSelected ? '#3b82f6' : '#22c55e';
-          }}
-          title={`Seat ${i + 1}`}
+      {/* Selection border */}
+      {isSelected && (
+        <rect
+          x={x + SELECTION_BORDER_OFFSET}
+          y={y + SELECTION_BORDER_OFFSET}
+          width={totalWidth + 50 - 2 * SELECTION_BORDER_OFFSET}
+          height={50 - 2 * SELECTION_BORDER_OFFSET}
+          fill="none"
+          stroke="#60a5fa"
+          strokeWidth="2"
+          rx="8"
+          style={{ pointerEvents: 'none' }}
         />
-      ))}
-    </div>
+      )}
+      
+      {/* Render seats */}
+      {seatPositions.map((pos, i) => {
+        const seatX = centerX + pos.x - SEAT_HALF_WIDTH;
+        const seatY = y + pos.y;
+        
+        return (
+          <g key={i}>
+            <rect
+              x={seatX}
+              y={seatY}
+              width={SEAT_WIDTH}
+              height={SEAT_WIDTH}
+              rx="8"
+              ry="0"
+              fill={isSelected ? '#3b82f6' : '#22c55e'}
+              filter="drop-shadow(0 2px 4px rgba(0,0,0,0.3))"
+              style={{ transition: 'fill 0.2s' }}
+            >
+              <title>Seat {i + 1}</title>
+            </rect>
+          </g>
+        );
+      })}
+    </g>
+  );
+};
+
+// Block Component (SVG-based)
+const Block = ({ item, isSelected, onMouseDown }) => {
+  const { x, y, width, height, name } = item;
+
+  return (
+    <g style={{ cursor: 'move' }} onMouseDown={onMouseDown}>
+      <rect
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        rx="8"
+        fill={isSelected ? '#9333ea' : '#a855f7'}
+        filter="drop-shadow(0 4px 6px rgba(0,0,0,0.3))"
+        stroke={isSelected ? '#c084fc' : 'none'}
+        strokeWidth={isSelected ? '4' : '0'}
+        style={{ transition: 'fill 0.2s, stroke 0.2s' }}
+      />
+      <text
+        x={x + width / 2}
+        y={y + height / 2}
+        textAnchor="middle"
+        dominantBaseline="middle"
+        fill="white"
+        fontSize="16"
+        fontWeight="bold"
+      >
+        {name}
+      </text>
+    </g>
+  );
+};
+
+// Group Component (SVG-based)
+const Group = ({ item, isSelected, onMouseDown }) => {
+  const { x, y, width, height, name } = item;
+
+  return (
+    <g style={{ cursor: 'move' }} onMouseDown={onMouseDown}>
+      <rect
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        rx="8"
+        fill={isSelected ? 'rgba(34, 197, 94, 0.3)' : 'rgba(34, 197, 94, 0.2)'}
+        stroke={isSelected ? '#4ade80' : '#22c55e'}
+        strokeWidth="4"
+        filter="drop-shadow(0 4px 6px rgba(0,0,0,0.2))"
+        style={{ transition: 'fill 0.2s, stroke 0.2s' }}
+      />
+      <text
+        x={x + width / 2}
+        y={y + height / 2}
+        textAnchor="middle"
+        dominantBaseline="middle"
+        fill={isSelected ? '#dcfce7' : '#bbf7d0'}
+        fontSize="16"
+        fontWeight="bold"
+      >
+        {name}
+      </text>
+    </g>
   );
 };
 
