@@ -1,57 +1,147 @@
-import { useState, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 
 const GRID_SIZE = 20;
-const SNAP_THRESHOLD = 10;
-const SELECTION_BORDER_WIDTH = 2;
 const SELECTION_BORDER_OFFSET = -10;
 const SEAT_WIDTH = 32;
 const SEAT_HALF_WIDTH = SEAT_WIDTH / 2;
 const STAGE_WIDTH = 200;
 
+// Type definitions
+type ItemType = 'row' | 'block' | 'group';
+
+interface BaseItem {
+  id: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  type: ItemType;
+}
+
+interface RowItem extends BaseItem {
+  type: 'row';
+  seats: number;
+  rotation: number;
+  curve: number;
+}
+
+interface BlockItem extends BaseItem {
+  type: 'block';
+  name: string;
+}
+
+interface GroupItem extends BaseItem {
+  type: 'group';
+  name: string;
+}
+
+type Item = RowItem | BlockItem | GroupItem;
+
+interface Position {
+  x: number;
+  y: number;
+}
+
+interface CanvasItemProps {
+  item: Item;
+  isSelected: boolean;
+  onMouseDown: (e: React.MouseEvent) => void;
+}
+
+interface SeatRowProps {
+  item: RowItem;
+  isSelected: boolean;
+  onMouseDown: (e: React.MouseEvent) => void;
+}
+
+interface BlockProps {
+  item: BlockItem;
+  isSelected: boolean;
+  onMouseDown: (e: React.MouseEvent) => void;
+}
+
+interface GroupProps {
+  item: GroupItem;
+  isSelected: boolean;
+  onMouseDown: (e: React.MouseEvent) => void;
+}
+
 // Helper function to generate grid background style
-const getGridBackgroundStyle = (gridSize) => ({
+const getGridBackgroundStyle = (gridSize: number): React.CSSProperties => ({
   backgroundImage: `
     repeating-linear-gradient(0deg, transparent, transparent ${gridSize - 1}px, rgba(100, 116, 139, 0.3) ${gridSize - 1}px, rgba(100, 116, 139, 0.3) ${gridSize}px),
     repeating-linear-gradient(90deg, transparent, transparent ${gridSize - 1}px, rgba(100, 116, 139, 0.3) ${gridSize - 1}px, rgba(100, 116, 139, 0.3) ${gridSize}px)
   `,
-  backgroundColor: '#1a202c'
+  backgroundColor: '#1a202c',
 });
 
 const SeatMap = () => {
-  const [items, setItems] = useState([]);
-  const [selectedItemId, setSelectedItemId] = useState(null);
-  const [draggingItemId, setDraggingItemId] = useState(null);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-  const [drawingMode, setDrawingMode] = useState(null); // 'row', 'block', 'group', null
+  const [items, setItems] = useState<Item[]>([]);
+  const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
+  const [draggingItemId, setDraggingItemId] = useState<number | null>(null);
+  const [dragOffset, setDragOffset] = useState<Position>({ x: 0, y: 0 });
+  const [drawingMode, setDrawingMode] = useState<ItemType | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
-  const [drawStart, setDrawStart] = useState(null);
-  const canvasRef = useRef(null);
+  const [drawStart, setDrawStart] = useState<Position | null>(null);
+  const canvasRef = useRef<SVGSVGElement>(null);
 
   // Snap to grid helper
-  const snapToGrid = (value) => {
+  const snapToGrid = (value: number): number => {
     return Math.round(value / GRID_SIZE) * GRID_SIZE;
   };
 
   // Add a new item based on drawing mode
-  const createItem = (x, y, width = 100, height = 50) => {
+  const createItem = (x: number, y: number, width = 100, height = 50) => {
     const snappedX = snapToGrid(x);
     const snappedY = snapToGrid(y);
-    
-    let newItem = {
-      id: Date.now(),
-      x: snappedX,
-      y: snappedY,
-      width: width,
-      height: height,
-      type: drawingMode || 'row',
-    };
+
+    let newItem: Item;
 
     if (drawingMode === 'row') {
-      newItem = { ...newItem, seats: 10, rotation: 0, curve: 0 };
+      newItem = {
+        id: Date.now(),
+        x: snappedX,
+        y: snappedY,
+        width,
+        height,
+        type: 'row',
+        seats: 10,
+        rotation: 0,
+        curve: 0,
+      };
     } else if (drawingMode === 'block') {
-      newItem = { ...newItem, name: 'Block ' + (items.filter(i => i.type === 'block').length + 1) };
+      newItem = {
+        id: Date.now(),
+        x: snappedX,
+        y: snappedY,
+        width,
+        height,
+        type: 'block',
+        name: 'Block ' + (items.filter((i) => i.type === 'block').length + 1),
+      };
     } else if (drawingMode === 'group') {
-      newItem = { ...newItem, name: 'Group ' + (items.filter(i => i.type === 'group').length + 1) };
+      newItem = {
+        id: Date.now(),
+        x: snappedX,
+        y: snappedY,
+        width,
+        height,
+        type: 'group',
+        name: 'Group ' + (items.filter((i) => i.type === 'group').length + 1),
+      };
+    } else {
+      // Default to row if no drawing mode
+      newItem = {
+        id: Date.now(),
+        x: snappedX,
+        y: snappedY,
+        width,
+        height,
+        type: 'row',
+        seats: 10,
+        rotation: 0,
+        curve: 0,
+      };
     }
 
     setItems([...items, newItem]);
@@ -59,10 +149,13 @@ const SeatMap = () => {
   };
 
   // Handle canvas mouse down
-  const handleCanvasMouseDown = (e) => {
+  const handleCanvasMouseDown = (e: React.MouseEvent<SVGSVGElement>) => {
     // Only handle clicks on the SVG canvas itself, not on its children
-    if (e.target.tagName.toLowerCase() !== 'svg' && e.target !== canvasRef.current) return;
-    
+    if ((e.target as HTMLElement).tagName.toLowerCase() !== 'svg' && e.target !== canvasRef.current)
+      return;
+
+    if (!canvasRef.current) return;
+
     const rect = canvasRef.current.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
@@ -77,10 +170,10 @@ const SeatMap = () => {
   };
 
   // Handle mouse down on an item
-  const handleItemMouseDown = (e, itemId) => {
+  const handleItemMouseDown = (e: React.MouseEvent, itemId: number) => {
     e.stopPropagation();
-    const item = items.find(i => i.id === itemId);
-    if (!item) return;
+    const item = items.find((i) => i.id === itemId);
+    if (!item || !canvasRef.current) return;
 
     const rect = canvasRef.current.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
@@ -92,7 +185,9 @@ const SeatMap = () => {
   };
 
   // Handle mouse move
-  const handleMouseMove = (e) => {
+  const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (!canvasRef.current) return;
+
     const rect = canvasRef.current.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
@@ -100,18 +195,16 @@ const SeatMap = () => {
     if (draggingItemId) {
       const newX = snapToGrid(mouseX - dragOffset.x);
       const newY = snapToGrid(mouseY - dragOffset.y);
-      
-      setItems(items.map(item => 
-        item.id === draggingItemId 
-          ? { ...item, x: newX, y: newY }
-          : item
-      ));
+
+      setItems(
+        items.map((item) => (item.id === draggingItemId ? { ...item, x: newX, y: newY } : item))
+      );
     }
   };
 
   // Handle mouse up
-  const handleMouseUp = (e) => {
-    if (isDrawing && drawStart && drawingMode) {
+  const handleMouseUp = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (isDrawing && drawStart && drawingMode && canvasRef.current) {
       const rect = canvasRef.current.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
@@ -129,36 +222,33 @@ const SeatMap = () => {
   };
 
   // Update item property
-  const updateItem = (itemId, property, value) => {
+  const updateItem = (itemId: number, property: string, value: string | number) => {
     // Parse numeric strings to numbers
-    const parsedValue = typeof value === 'string' && !isNaN(parseFloat(value)) 
-      ? parseFloat(value) 
-      : value;
-    
-    setItems(items.map(item => 
-      item.id === itemId 
-        ? { ...item, [property]: parsedValue }
-        : item
-    ));
+    const parsedValue =
+      typeof value === 'string' && !isNaN(parseFloat(value)) ? parseFloat(value) : value;
+
+    setItems(
+      items.map((item) => (item.id === itemId ? { ...item, [property]: parsedValue } : item))
+    );
   };
 
   // Delete item
-  const deleteItem = (itemId) => {
-    setItems(items.filter(item => item.id !== itemId));
+  const deleteItem = (itemId: number) => {
+    setItems(items.filter((item) => item.id !== itemId));
     if (selectedItemId === itemId) {
       setSelectedItemId(null);
     }
   };
 
   // Get selected item
-  const selectedItem = items.find(item => item.id === selectedItemId);
+  const selectedItem = items.find((item) => item.id === selectedItemId);
 
   return (
     <div className="h-screen bg-gray-900 text-white flex flex-col overflow-hidden">
       {/* Top Toolbox */}
       <div className="bg-gray-800 border-b border-gray-700 px-6 py-3 flex items-center gap-4">
         <h1 className="text-xl font-bold mr-4">Seat Map Designer</h1>
-        
+
         <div className="flex gap-2">
           <button
             onClick={() => setDrawingMode(drawingMode === 'row' ? null : 'row')}
@@ -170,7 +260,7 @@ const SeatMap = () => {
           >
             🪑 Seat Row
           </button>
-          
+
           <button
             onClick={() => setDrawingMode(drawingMode === 'block' ? null : 'block')}
             className={`px-4 py-2 rounded-lg font-medium transition-colors ${
@@ -181,7 +271,7 @@ const SeatMap = () => {
           >
             ⬛ Block
           </button>
-          
+
           <button
             onClick={() => setDrawingMode(drawingMode === 'group' ? null : 'group')}
             className={`px-4 py-2 rounded-lg font-medium transition-colors ${
@@ -195,7 +285,9 @@ const SeatMap = () => {
         </div>
 
         <div className="ml-auto text-sm text-gray-400">
-          {drawingMode ? `Drawing mode: ${drawingMode} - Click and drag on canvas` : 'Select a tool or click items to edit'}
+          {drawingMode
+            ? `Drawing mode: ${drawingMode} - Click and drag on canvas`
+            : 'Select a tool or click items to edit'}
         </div>
       </div>
 
@@ -204,12 +296,10 @@ const SeatMap = () => {
         {selectedItem && (
           <div className="w-80 bg-gray-800 border-r border-gray-700 p-6 overflow-y-auto">
             <h2 className="text-xl font-semibold mb-4">Properties</h2>
-            
+
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1 text-gray-300">
-                  Type
-                </label>
+                <label className="block text-sm font-medium mb-1 text-gray-300">Type</label>
                 <div className="px-3 py-2 bg-gray-700 rounded-lg text-white capitalize">
                   {selectedItem.type}
                 </div>
@@ -264,9 +354,7 @@ const SeatMap = () => {
               {(selectedItem.type === 'block' || selectedItem.type === 'group') && (
                 <>
                   <div>
-                    <label className="block text-sm font-medium mb-2 text-gray-300">
-                      Name
-                    </label>
+                    <label className="block text-sm font-medium mb-2 text-gray-300">Name</label>
                     <input
                       type="text"
                       value={selectedItem.name || ''}
@@ -306,9 +394,7 @@ const SeatMap = () => {
               )}
 
               <div>
-                <label className="block text-sm font-medium mb-2 text-gray-300">
-                  Position
-                </label>
+                <label className="block text-sm font-medium mb-2 text-gray-300">Position</label>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="text-xs text-gray-400">X</label>
@@ -371,14 +457,7 @@ const SeatMap = () => {
                 filter="drop-shadow(0 4px 6px rgba(0,0,0,0.3))"
                 transform={`translate(-${STAGE_WIDTH / 2}, 0)`}
               />
-              <text
-                x="50%"
-                y="60"
-                textAnchor="middle"
-                fill="white"
-                fontSize="18"
-                fontWeight="bold"
-              >
+              <text x="50%" y="60" textAnchor="middle" fill="white" fontSize="18" fontWeight="bold">
                 STAGE
               </text>
             </g>
@@ -414,7 +493,7 @@ const SeatMap = () => {
 };
 
 // Canvas Item Component - Renders different types of items
-const CanvasItem = ({ item, isSelected, onMouseDown }) => {
+const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, onMouseDown }) => {
   if (item.type === 'row') {
     return <SeatRow item={item} isSelected={isSelected} onMouseDown={onMouseDown} />;
   } else if (item.type === 'block') {
@@ -426,21 +505,21 @@ const CanvasItem = ({ item, isSelected, onMouseDown }) => {
 };
 
 // Seat Row Component (SVG-based)
-const SeatRow = ({ item, isSelected, onMouseDown }) => {
+const SeatRow: React.FC<SeatRowProps> = ({ item, isSelected, onMouseDown }) => {
   const { x, y, seats, rotation, curve } = item;
 
   // Calculate seat positions based on curve
-  const seatPositions = [];
+  const seatPositions: Position[] = [];
   const seatSpacing = 35;
   const totalWidth = (seats - 1) * seatSpacing;
-  
+
   for (let i = 0; i < seats; i++) {
     const offset = i * seatSpacing - totalWidth / 2;
-    
+
     // Apply curve (quadratic)
     const curveAmount = curve / 100;
     const curveY = curveAmount * Math.pow(offset / (totalWidth / 2), 2) * 50;
-    
+
     seatPositions.push({
       x: offset,
       y: curveY,
@@ -470,12 +549,12 @@ const SeatRow = ({ item, isSelected, onMouseDown }) => {
           style={{ pointerEvents: 'none' }}
         />
       )}
-      
+
       {/* Render seats */}
       {seatPositions.map((pos, i) => {
         const seatX = centerX + pos.x - SEAT_HALF_WIDTH;
         const seatY = y + pos.y;
-        
+
         return (
           <g key={i}>
             <rect
@@ -499,7 +578,7 @@ const SeatRow = ({ item, isSelected, onMouseDown }) => {
 };
 
 // Block Component (SVG-based)
-const Block = ({ item, isSelected, onMouseDown }) => {
+const Block: React.FC<BlockProps> = ({ item, isSelected, onMouseDown }) => {
   const { x, y, width, height, name } = item;
 
   return (
@@ -532,7 +611,7 @@ const Block = ({ item, isSelected, onMouseDown }) => {
 };
 
 // Group Component (SVG-based)
-const Group = ({ item, isSelected, onMouseDown }) => {
+const Group: React.FC<GroupProps> = ({ item, isSelected, onMouseDown }) => {
   const { x, y, width, height, name } = item;
 
   return (
